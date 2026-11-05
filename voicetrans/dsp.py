@@ -402,6 +402,21 @@ class VoiceShifter:
         ker = np.hanning(ksz + 2)[1:-1]
         self.env_ker = ker / ker.sum()
 
+        # ---- 频谱人声降噪状态（复用上面的 FFT，零额外延迟）----
+        self.noise = np.zeros_like(self.freqs)     # 每频点噪声地板（幅度）
+        self.g_prev = np.ones_like(self.freqs)     # 上一帧增益，做时间平滑防"音乐噪声"
+        self._dn_frames = 0
+        self._dn_warm = int(0.6 * fs / hop)        # 开头 0.6 s 只学习、轻衰减
+        n_ef = max(40, int(1.0 * fs / hop))        # 1 s 帧能量环形缓冲（VAD 用）
+        self._e_buf = np.zeros(n_ef)
+        self._e_i = 0
+        self._e_valid = 0
+        fker = np.hanning(5)
+        self.dn_fker = fker / fker.sum()           # 频率方向平滑核
+        dt = hop / fs
+        self.dn_att = 1 - math.exp(-dt / 0.004)    # 增益打开 4 ms
+        self.dn_rel = 1 - math.exp(-dt / 0.045)    # 增益收回 45 ms
+
     def _window_sum(self):
         """稳态 OLA 增益：在远离两端的区域统计 Σw²（Hann + 75% 重叠 = 1.5）。"""
         frames = int(3 * self.n / self.hop) + 2
@@ -419,24 +434,67 @@ class VoiceShifter:
         lm = np.pad(lm, pad, mode="edge")
         return np.convolve(lm, self.env_ker, mode="valid")
 
+    def _dn_gain(self, mag, strength):
+        """频谱人声降噪：估计每频点噪声地板，按信噪比算软增益。
+
+        * 帧级 VAD 不依赖地板本身：用最近 1 s 帧能量的 10% 分位做参照，
+          能量贴近参照（+3 dB 内）判定为纯噪声帧 —— 避免"地板太低 →
+          SNR 虚高 → 永不学习"的死锁；
+        * 纯噪声帧上地板双向学习（收敛快），语音帧只把变安静的频点
+          缓慢下修（保护起音，不把人声锁死）；
+        * 增益在时间、频率两个维度平滑，避免经典谱减法的"音乐噪声"。
+        """
+        e = float(np.mean(np.square(mag))) + 1e-12
+        if self._dn_frames == 0:
+            self.noise = mag.copy()
+        self._e_buf[self._e_i] = e
+        self._e_i = int((self._e_i + 1) % len(self._e_buf))
+        self._e_valid = min(self._e_valid + 1, len(self._e_buf))
+        self._dn_frames += 1
+        if self._e_valid > 15:                     # 缓冲已有统计再开始学习
+            e_floor = float(np.percentile(self._e_buf[: self._e_valid], 10))
+            if e < e_floor * 2.0:                  # 帧能量贴近底噪 → 纯噪声帧
+                self.noise = self.noise + (mag - self.noise) * 0.10
+            else:                                  # 语音帧：只学变安静的频点
+                quiet = mag < self.noise
+                self.noise = np.where(quiet, self.noise + (mag - self.noise) * 0.02,
+                                      self.noise)
+        snr_db = 20.0 * np.log10((mag + 1e-7) / (self.noise + 1e-7))
+        thr = 5.0 + strength * 0.10                # 5..15 dB，越大越"狠"
+        sp = np.clip((snr_db - thr) / 8.0, 0.0, 1.0)
+        maxatt = 8.0 + strength * 0.16             # 最多压 8..24 dB
+        if self._dn_frames < self._dn_warm:        # 开头保守，先学习再放开
+            maxatt *= 0.5
+        floor = 10.0 ** (-maxatt / 20.0)
+        g = floor + (1.0 - floor) * sp
+        coef = np.where(g > self.g_prev, self.dn_att, self.dn_rel)
+        self.g_prev = self.g_prev + (g - self.g_prev) * coef
+        pad = np.pad(self.g_prev, 2, mode="edge")
+        return np.convolve(pad, self.dn_fker, mode="valid")
+
     def reset(self):
         self.prev_phase[:] = 0
         self.synth_phase[:] = 0
         self.inbuf[:] = 0
         self.ola[:] = 0
+        self.noise[:] = 0
+        self.g_prev[:] = 1.0
+        self._dn_frames = 0
 
-    def process(self, block, pitch_ratio=1.0, formant_ratio=1.0):
+    def process(self, block, pitch_ratio=1.0, formant_ratio=1.0, denoise=0.0):
         hop, n = self.hop, self.n
         self.inbuf = np.concatenate((self.inbuf[hop:], block.astype(np.float64)))
         frame = self.inbuf * self.w
         X = np.fft.rfft(frame)
+        if denoise > 0.5:                          # 降噪在变调之前：噪声不参与搬移
+            X = X * self._dn_gain(np.abs(X), denoise)
         mag = np.abs(X)
         ph = np.angle(X)
 
         identity = abs(pitch_ratio - 1.0) < 1e-4 and abs(formant_ratio - 1.0) < 1e-4
         if identity:
             self.prev_phase = ph
-            out_frame = frame
+            out_frame = np.fft.irfft(X, n) if denoise > 0.5 else frame
         else:
             dphi = ph - self.prev_phase - self.hop * self.bin_omega
             dphi = np.mod(dphi + np.pi, 2 * np.pi) - np.pi
@@ -548,7 +606,11 @@ class VoiceChain:
 
         pr = semitones_to_ratio(float(p.get("pitch", 0.0)))
         fr = semitones_to_ratio(float(p.get("formant", 0.0)))
-        x = self.shifter.process(x, pr, fr)
+        # 人声降噪在变调之前：先压掉稳态底噪，噪声不会被一起搬移、染色
+        dn = self._smooth("dn", float(p.get("denoise", 0)))
+        if not bool(p.get("denoise_on", True)):
+            dn = 0.0
+        x = self.shifter.process(x, pr, fr, denoise=dn)
         # 齿音抑制紧跟变声：只处理"变调后变刺"的那一段，且不被后面的气声噪声误触发
         x = self.deess.process(x, self._smooth("deess", float(p.get("deess", 0))))
 

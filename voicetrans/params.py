@@ -18,6 +18,10 @@ def _p(key, label, lo, hi, step, default, unit="", group="变声", kind="slider"
 PARAMS = [
     # ---------------- 输入 ----------------
     _p("input_gain", "输入增益", -24, 24, 0.5, 0.0, "dB", "输入", hint="麦克风太小/太大时先调这里"),
+    _p("denoise_on", "人声降噪", 0, 1, 1, True, "", "输入", "switch",
+       hint="只保留人声，压掉风扇/键盘/电流底噪；开启后先安静约 1 秒学习噪声底"),
+    _p("denoise", "降噪强度", 0, 100, 1, 45, "%", "输入",
+       hint="越大底噪越干净；过高会有轻微“水声”感，直播 40~60 即可"),
     _p("gate_on", "噪声门", 0, 1, 1, True, "", "输入", "switch", hint="不说话时自动闭麦，屏蔽键盘声与底噪"),
     _p("gate_db", "门限", -80, -10, 1, -52, "dB", "输入", hint="环境吵就往上调，漏气就往下降"),
     _p("hpf", "低切", 40, 400, 5, 80, "Hz", "输入", hint="切掉轰隆声/喷麦低频"),
@@ -66,7 +70,7 @@ PRESETS = [
     _preset("原声直通", "不做任何处理，用于对比", bypass=False),
     _preset("甜美女声", "男声 → 女声，甜而不尖", pitch=8.5, formant=3.2, eq_low=-3.0,
             eq_mid=2.5, eq_high=2.5, comp=16, reverb_mix=5, hpf=125,
-            deess=40, whisper=3, output_gain=1.5),
+            deess=40, whisper=3, denoise=50, output_gain=1.5),
     _preset("萝莉音", "高甜、偏薄，适合聊天/游戏", pitch=10.0, formant=6.5, eq_high=3.0,
             whisper=6, comp=30, reverb_mix=10),
     _preset("御姐音", "低沉女声，气场强", pitch=3.0, formant=2.0, eq_low=1.5, comp=40,
