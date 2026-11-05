@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>VOICE TRANS · 本地实时变声台</title>
+<style>
+  :root{
+    --bg:#0a0d12; --panel-a:rgba(255,255,255,.055); --panel-b:rgba(255,255,255,.018);
+    --line:rgba(255,255,255,.085); --line-soft:rgba(255,255,255,.05);
+    --text:#e9eef7; --dim:#8a95a8; --dim2:#5d6879;
+    --accent:#4c8dff; --accent2:#22d3ee; --ok:#34d399; --warn:#fbbf24; --danger:#f87171;
+    --mono:"JetBrains Mono","SFMono-Regular",ui-monospace,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; color:var(--text); font-size:14px; letter-spacing:.01em;
+    font-family:"Inter","PingFang SC","HarmonyOS Sans SC","Microsoft YaHei",system-ui,sans-serif;
+    background:
+      radial-gradient(1100px 700px at 12% -12%, #17253d 0%, transparent 58%),
+      radial-gradient(900px 600px at 100% -5%, #16303a 0%, transparent 52%),
+      var(--bg);
+    -webkit-font-smoothing:antialiased;
+  }
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+  /* ---------- top bar ---------- */
+  .topbar{
+    display:flex; align-items:center; gap:22px; padding:14px 22px;
+    border-bottom:1px solid var(--line-soft); background:rgba(10,13,18,.72);
+    backdrop-filter:blur(14px); position:sticky; top:0; z-index:20;
+  }
+  .brand{display:flex;align-items:center;gap:12px;min-width:220px}
+  .logo{
+    width:38px;height:38px;border-radius:11px;display:grid;place-items:center;
+    background:linear-gradient(140deg,var(--accent),var(--accent2));color:#06121f;
+    font-weight:800;font-size:14px;letter-spacing:.04em;
+    box-shadow:0 6px 20px rgba(76,141,255,.32);
+  }
+  .title{font-weight:700;font-size:15px;letter-spacing:.12em}
+  .sub{font-size:11px;color:var(--dim2);letter-spacing:.06em;margin-top:2px}
+  .stats{display:flex;gap:8px;flex:1;flex-wrap:wrap}
+  .chip{
+    display:flex;align-items:center;gap:8px;padding:6px 11px;border-radius:9px;
+    background:rgba(255,255,255,.04);border:1px solid var(--line-soft);font-size:12px;
+  }
+  .chip .k{color:var(--dim2);font-size:11px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--dim2);box-shadow:0 0 0 3px rgba(255,255,255,.03)}
+  .dot.on{background:var(--ok);box-shadow:0 0 0 3px rgba(52,211,153,.16);animation:pulse 2.2s infinite}
+  .dot.err{background:var(--danger);box-shadow:0 0 0 3px rgba(248,113,113,.16)}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+  .actions{display:flex;gap:8px}
+  button{font-family:inherit;font-size:13px;cursor:pointer;border-radius:9px;border:1px solid var(--line);
+    background:rgba(255,255,255,.05);color:var(--text);padding:8px 14px;transition:.16s}
+  button:hover{background:rgba(255,255,255,.09)}
+  button:active{transform:translateY(1px)}
+  button.primary{background:linear-gradient(140deg,var(--accent),#3f7cf0);border-color:transparent;
+    color:#fff;font-weight:600;box-shadow:0 6px 18px rgba(76,141,255,.28)}
+  button.primary:hover{filter:brightness(1.07)}
+  button.wide{width:100%;margin-top:10px}
+  button.on{background:rgba(248,113,113,.16);border-color:rgba(248,113,113,.5);color:#ffd7d7}
+  .recdot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--danger);margin-right:7px;vertical-align:1px}
+
+  /* ---------- layout ---------- */
+  main{
+    display:grid; grid-template-columns:246px minmax(0,1fr) 306px; gap:16px;
+    padding:18px 22px 40px; max-width:1560px; margin:0 auto; align-items:start;
+  }
+  @media (max-width:1180px){ main{grid-template-columns:220px minmax(0,1fr)} .right{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,1fr);gap:16px} }
+  @media (max-width:860px){ main{grid-template-columns:1fr} .right{grid-template-columns:1fr} }
+
+  .card{
+    background:linear-gradient(180deg,var(--panel-a),var(--panel-b));
+    border:1px solid var(--line); border-radius:15px; padding:15px 17px 17px;
+    box-shadow:0 10px 30px rgba(0,0,0,.22);
+  }
+  .card + .card{margin-top:14px}
+  .card-head{display:flex;align-items:baseline;gap:8px;margin-bottom:12px}
+  .card-head h3,.panel-title{margin:0;font-size:12.5px;font-weight:650;letter-spacing:.14em;color:#cfd8e8;text-transform:uppercase}
+  .hint{font-size:11px;color:var(--dim2);letter-spacing:0}
+
+  /* ---------- presets ---------- */
+  .presets .card{padding:14px}
+  #preset-list{display:flex;flex-direction:column;gap:4px;margin-top:10px;max-height:calc(100vh - 250px);overflow:auto}
+  #preset-list::-webkit-scrollbar{width:6px}
+  #preset-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:3px}
+  .preset{
+    display:flex;flex-direction:column;gap:2px;align-items:flex-start;width:100%;
+    padding:8px 11px;border:1px solid transparent;background:transparent;border-radius:9px;text-align:left;
+    position:relative;
+  }
+  .preset:hover{background:rgba(255,255,255,.05)}
+  .preset.active{
+    background:linear-gradient(90deg,rgba(76,141,255,.20),rgba(34,211,238,.06));
+    border-color:rgba(76,141,255,.35);
+  }
+  .preset.active::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;border-radius:2px;
+    background:linear-gradient(180deg,var(--accent),var(--accent2))}
+  .preset .nm{font-size:13px;font-weight:600}
+  .preset .ds{font-size:10.5px;color:var(--dim2);line-height:1.35}
+  .preset.active .ds{color:#9fb6d6}
+  .link{background:none;border:none;color:var(--dim);font-size:11.5px;padding:10px 2px 0;text-decoration:underline;text-underline-offset:3px}
+
+  /* ---------- params ---------- */
+  .rows{display:flex;flex-direction:column;gap:11px}
+  .row{display:grid;grid-template-columns:132px minmax(80px,1fr) 82px;align-items:center;gap:14px}
+  .row .lb{font-size:12.5px;color:#c3ccdc;display:flex;align-items:center;gap:5px}
+  .row .lb .q{width:13px;height:13px;border-radius:50%;border:1px solid var(--line);color:var(--dim2);
+    font-size:9px;display:grid;place-items:center;cursor:help;flex:none}
+  .row .val{font-family:var(--mono);font-size:12.5px;text-align:right;color:var(--accent);
+    font-variant-numeric:tabular-nums;white-space:nowrap}
+  .row .val em{color:var(--dim2);font-style:normal;font-size:10.5px;margin-left:2px}
+
+  input[type=range]{
+    -webkit-appearance:none;appearance:none;width:100%;height:5px;border-radius:99px;outline:none;
+    background:linear-gradient(90deg,var(--accent),var(--accent2) var(--p,50%),rgba(255,255,255,.09) var(--p,50%));
+    cursor:pointer;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:#fff;
+    border:none;box-shadow:0 0 0 3px rgba(76,141,255,.28),0 2px 6px rgba(0,0,0,.4);
+    transition:box-shadow .15s, transform .15s;
+  }
+  input[type=range]:hover::-webkit-slider-thumb{transform:scale(1.12);box-shadow:0 0 0 5px rgba(76,141,255,.22),0 2px 8px rgba(0,0,0,.45)}
+  input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:#fff;border:none}
+
+  .switch{
+    width:42px;height:23px;border-radius:99px;padding:0;border:1px solid var(--line);
+    background:rgba(255,255,255,.08);position:relative;transition:.18s;justify-self:end;
+  }
+  .switch span{position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;
+    background:#8b96a8;transition:.18s}
+  .switch[data-on="1"]{background:linear-gradient(90deg,var(--accent),var(--accent2));border-color:transparent}
+  .switch[data-on="1"] span{left:21px;background:#fff}
+
+  /* big controls */
+  .big .row{grid-template-columns:132px minmax(80px,1fr) 96px;gap:16px}
+  .big .row .val{font-size:15px;font-weight:600}
+  .big .row .lb{font-size:13px;color:#dfe7f4}
+
+  /* ---------- devices / meters ---------- */
+  label.fld{display:block;font-size:11.5px;color:var(--dim);margin:10px 0 5px;letter-spacing:.03em}
+  select{
+    width:100%;padding:8px 10px;border-radius:9px;background:rgba(255,255,255,.05);
+    color:var(--text);border:1px solid var(--line);font-family:inherit;font-size:12px;outline:none;
+  }
+  select:focus{border-color:rgba(76,141,255,.55)}
+  option{background:#11161f;color:#e9eef7}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .hint-box{
+    margin-top:11px;padding:9px 11px;border-radius:9px;font-size:11.5px;line-height:1.5;
+    background:rgba(251,191,36,.09);border:1px solid rgba(251,191,36,.22);color:#f4d79a;
+  }
+  .hint-box.ok{background:rgba(52,211,153,.09);border-color:rgba(52,211,153,.22);color:#9fe8c9}
+  .hint-box.mute{background:rgba(255,255,255,.04);border-color:var(--line);color:var(--dim)}
+  .hint-box a{color:inherit}
+
+  .meter-wrap{display:flex;gap:12px;margin-top:6px}
+  .scale{display:flex;flex-direction:column;justify-content:space-between;height:140px;
+    font-family:var(--mono);font-size:9.5px;color:var(--dim2);text-align:right;width:26px}
+  .bars{display:flex;gap:16px;flex:1}
+  .bar-col{display:flex;flex-direction:column;align-items:center;gap:6px;flex:1}
+  .bar{
+    width:100%;max-width:46px;height:140px;border-radius:7px;background:rgba(255,255,255,.055);
+    border:1px solid var(--line-soft);position:relative;overflow:hidden;display:flex;align-items:flex-end;
+  }
+  .bar-fill{width:100%;height:0%;border-radius:5px 5px 0 0;
+    background:linear-gradient(180deg,#f87171 0%,#fbbf24 14%,#34d399 42%,#22d3ee 100%);
+    transition:height .07s linear;opacity:.92}
+  .bar-hold{position:absolute;left:0;right:0;height:2px;background:#fff;opacity:.75;bottom:0;transition:bottom .12s}
+  .bar-col .cap{font-size:10px;color:var(--dim2);letter-spacing:.08em}
+  .readout{display:flex;justify-content:space-between;margin-top:10px;font-family:var(--mono);font-size:11px;color:var(--dim)}
+  .readout b{color:#cfd8e8;font-weight:500}
+
+  .rec-file{font-family:var(--mono);font-size:10.5px;color:var(--dim2);word-break:break-all;margin-top:8px;line-height:1.5}
+  .tips{margin:0;padding-left:15px;font-size:11.5px;line-height:1.85;color:var(--dim)}
+  .tips li{margin:0}
+  .tips b{color:#cfd8e8;font-weight:550}
+  footer{text-align:center;color:var(--dim2);font-size:11px;padding:0 0 26px}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">VT</div>
+    <div>
+      <div class="title">VOICE TRANS</div>
+      <div class="sub">本地实时变声台 · 全程离线</div>
+    </div>
+  </div>
+  <div class="stats">
+    <div class="chip"><span class="k">状态</span><span class="dot" id="stat-dot"></span><span id="stat-text">连接中</span></div>
+    <div class="chip"><span class="k">延迟</span><span class="mono" id="stat-lat">—</span></div>
+    <div class="chip"><span class="k">CPU</span><span class="mono" id="stat-cpu">—</span></div>
+    <div class="chip"><span class="k">采样</span><span class="mono" id="stat-sr">—</span></div>
+  </div>
+  <div class="actions">
+    <button id="btn-bypass" title="快捷键 B">旁通</button>
+    <button id="btn-record"><span class="recdot"></span>录制</button>
+    <button id="btn-power" class="primary">启动</button>
+  </div>
+</header>
+
+<main>
+  <aside class="presets">
+    <div class="card">
+      <div class="card-head"><h3>预设</h3><span class="hint">一键切换</span></div>
+      <div id="preset-list"></div>
+      <button class="link" id="btn-reset">恢复默认参数</button>
+    </div>
+  </aside>
+
+  <section class="console" id="cards"></section>
+
+  <aside class="right">
+    <div class="card">
+      <div class="card-head"><h3>设备</h3></div>
+      <label class="fld">麦克风输入</label>
+      <select id="sel-in"></select>
+      <label class="fld">输出去向</label>
+      <select id="sel-out"></select>
+      <div class="grid2">
+        <div><label class="fld">采样率</label>
+          <select id="sel-sr"><option value="48000">48 kHz</option><option value="44100">44.1 kHz</option></select>
+        </div>
+        <div><label class="fld">缓冲</label>
+          <select id="sel-block"><option value="128">128 · 极低延迟</option><option value="256">256 · 推荐</option><option value="512">512 · 稳定</option></select>
+        </div>
+      </div>
+      <button class="primary wide" id="btn-apply">应用并重启音频</button>
+      <button class="link" id="btn-refresh" style="padding-top:8px">刷新设备列表（装完虚拟声卡后点这里）</button>
+      <div class="hint-box mute" id="route-hint">正在检测音频路由…</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>电平</h3><span class="hint">dBFS</span></div>
+      <div class="meter-wrap">
+        <div class="scale"><span>0</span><span>-12</span><span>-24</span><span>-36</span><span>-48</span><span>-60</span></div>
+        <div class="bars">
+          <div class="bar-col">
+            <div class="bar"><div class="bar-fill" id="m-in"></div><div class="bar-hold" id="m-in-hold"></div></div>
+            <span class="cap">输入</span>
+          </div>
+          <div class="bar-col">
+            <div class="bar"><div class="bar-fill" id="m-out"></div><div class="bar-hold" id="m-out-hold"></div></div>
+            <span class="cap">输出</span>
+          </div>
+        </div>
+      </div>
+      <div class="readout"><span>峰值 <b id="ro-in">—</b></span><span>峰值 <b id="ro-out">—</b></span></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>录制</h3><span class="hint">处理后音频</span></div>
+      <button class="wide" id="btn-rec2"><span class="recdot"></span>开始录制</button>
+      <div class="rec-file" id="rec-file">录音保存在项目的 recordings 目录</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>调参速查</h3></div>
+      <ul class="tips">
+        <li>说话时输入峰值落在 <b>−12 ~ −6 dB</b> 最干净</li>
+        <li>音高改动控制在 <b>±7 半音</b> 内最自然，再大容易金属味</li>
+        <li>男变女：音高 +5~7，音色 +3~4；女变男反过来</li>
+        <li>直播输出留 <b>−3 dB</b> 余量，限幅常开</li>
+        <li>快捷键：<b>B</b> 旁通对比，<b>R</b> 录制</li>
+      </ul>
+    </div>
+  </aside>
+</main>
+
+<footer>所有音频都在本机处理，不联网、不上传 · 输出到虚拟声卡后，直播软件里选 “CABLE Output” 即可</footer>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let SCHEMA = null, VALUES = {}, STATUS = {}, PRESET = "";
+const pending = new Map();
+let flushTimer = null;
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : {
+    method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)
+  };
+  const r = await fetch(path, opt);
+  return r.json();
+}
+
+/* ---------------- 构建界面 ---------------- */
+function buildPresets() {
+  const box = $("#preset-list");
+  box.innerHTML = "";
+  SCHEMA.presets.forEach((p) => {
+    const b = document.createElement("button");
+    b.className = "preset";
+    b.dataset.name = p.name;
+    b.innerHTML = `<span class="nm">${p.name}</span><span class="ds">${p.desc}</span>`;
+    b.onclick = async () => {
+      const r = await api("/api/preset", {name: p.name});
+      if (r.ok) { applyValues(r.values); setPreset(r.preset); }
+    };
+    box.appendChild(b);
+  });
+}
+
+function setPreset(name) {
+  PRESET = name || "";
+  document.querySelectorAll(".preset").forEach((el) => {
+    el.classList.toggle("active", el.dataset.name === PRESET);
+  });
+}
+
+function fmtVal(spec, v) {
+  if (spec.kind === "switch") return v ? "开" : "关";
+  const step = spec.step || 1;
+  const dec = step < 0.5 ? 2 : (step < 1 ? 1 : 0);
+  const num = Number(v).toFixed(dec);
+  const signed = spec.min < 0 && Number(v) > 0 ? "+" + num : num;
+  return `${signed}<em>${spec.unit || ""}</em>`;
+}
+
+function buildCards() {
+  const host = $("#cards");
+  host.innerHTML = "";
+  SCHEMA.groups.forEach((g) => {
+    const items = SCHEMA.params.filter((p) => p.group === g);
+    if (!items.length) return;
+    const card = document.createElement("div");
+    card.className = "card" + (g === "变声" ? " big" : "");
+    const hints = {变声: "音高改变音调，共振峰改变“像谁”", 输入: "先让输入电平健康：说话时峰值 −12 ~ −6 dB",
+                   音色: "三段 EQ，轻微即可", 效果: "叠加型特效，越往上越夸张", 输出: "直播平台一般要求 −3 dB 以内"};
+    card.innerHTML = `<div class="card-head"><h3>${g}</h3><span class="hint">${hints[g] || ""}</span></div><div class="rows"></div>`;
+    const rows = card.querySelector(".rows");
+    items.forEach((spec) => rows.appendChild(makeRow(spec)));
+    host.appendChild(card);
+  });
+}
+
+function makeRow(spec) {
+  const row = document.createElement("div");
+  row.className = "row";
+  if (spec.kind === "switch") {
+    row.innerHTML = `<div class="lb">${spec.label}${spec.hint ? `<span class="q" title="${spec.hint}">?</span>` : ""}</div>
+      <div></div><button class="switch" data-on="0" data-key="${spec.key}"><span></span></button>`;
+    const sw = row.querySelector(".switch");
+    sw.onclick = () => {
+      const on = sw.dataset.on !== "1";
+      sw.dataset.on = on ? "1" : "0";
+      queueSet(spec.key, on);
+    };
+  } else {
+    const pct = ((VALUES[spec.key] - spec.min) / (spec.max - spec.min)) * 100;
+    row.innerHTML = `<div class="lb">${spec.label}${spec.hint ? `<span class="q" title="${spec.hint}">?</span>` : ""}</div>
+      <input type="range" min="${spec.min}" max="${spec.max}" step="${spec.step}"
+             value="${VALUES[spec.key]}" style="--p:${pct}%" data-key="${spec.key}">
+      <div class="val" data-val="${spec.key}">${fmtVal(spec, VALUES[spec.key])}</div>`;
+    const input = row.querySelector("input");
+    input.addEventListener("input", () => {
+      const v = Number(input.value);
+      const p = ((v - spec.min) / (spec.max - spec.min)) * 100;
+      input.style.setProperty("--p", p + "%");
+      row.querySelector(".val").innerHTML = fmtVal(spec, v);
+      VALUES[spec.key] = v;
+      queueSet(spec.key, v);
+    });
+  }
+  return row;
+}
+
+/* ---------------- 参数同步 ---------------- */
+function queueSet(key, value) {
+  pending.set(key, value);
+  if (flushTimer) return;
+  flushTimer = setTimeout(async () => {
+    flushTimer = null;
+    const items = [...pending.entries()];
+    pending.clear();
+    for (const [k, v] of items) {
+      const r = await api("/api/set", {key: k, value: v});
+      if (r.preset !== undefined) setPreset(r.preset);
+    }
+  }, 70);
+}
+
+function applyValues(vals) {
+  VALUES = {...VALUES, ...vals};
+  SCHEMA.params.forEach((spec) => {
+    const el = document.querySelector(`[data-key="${spec.key}"]`);
+    if (!el) return;
+    if (spec.kind === "switch") {
+      el.dataset.on = vals[spec.key] ? "1" : "0";
+    } else {
+      el.value = vals[spec.key];
+      const p = ((vals[spec.key] - spec.min) / (spec.max - spec.min)) * 100;
+      el.style.setProperty("--p", p + "%");
+      const valEl = document.querySelector(`[data-val="${spec.key}"]`);
+      if (valEl) valEl.innerHTML = fmtVal(spec, vals[spec.key]);
+    }
+  });
+  $("#btn-bypass").classList.toggle("on", !!vals.bypass);
+}
+
+/* ---------------- 设备 ---------------- */
+function fillDevices() {
+  const si = $("#sel-in"), so = $("#sel-out");
+  si.innerHTML = ""; so.innerHTML = "";
+  const groups = {};
+  SCHEMA.devices.forEach((d) => {
+    if (!d.in && !d.out) return;
+    (groups[d.hostapi] = groups[d.hostapi] || []).push(d);
+  });
+  Object.keys(groups).forEach((apiName) => {
+    const gi = document.createElement("optgroup"); gi.label = apiName;
+    const go = document.createElement("optgroup"); go.label = apiName;
+    groups[apiName].forEach((d) => {
+      if (d.in > 0) {
+        const o = document.createElement("option");
+        o.value = d.index;
+        o.textContent = `${d.name}${d.virtual ? " · 虚拟" : ""}`;
+        gi.appendChild(o);
+      }
+      if (d.out > 0) {
+        const o = document.createElement("option");
+        o.value = d.index;
+        o.textContent = `${d.name}${d.virtual ? " · 虚拟" : ""}`;
+        go.appendChild(o);
+      }
+    });
+    if (gi.children.length) si.appendChild(gi);
+    if (go.children.length) so.appendChild(go);
+  });
+  si.value = SCHEMA.config.input_device;
+  so.value = SCHEMA.config.output_device;
+  $("#sel-sr").value = String(SCHEMA.config.samplerate);
+  $("#sel-block").value = String(SCHEMA.config.blocksize);
+}
+
+function routeHint(st) {
+  const box = $("#route-hint");
+  box.className = "hint-box";
+  const outName = (st.out_name || "").toLowerCase();
+  const toCable = outName.includes("cable input") || outName.includes("voicemeeter input");
+  if (toCable) {
+    box.classList.add("ok");
+    box.innerHTML = `已路由到虚拟声卡。直播软件/OBS 里把麦克风选成 <b>CABLE Output</b> 就能收听到变声后的声音。`;
+  } else if (!st.virtual_cable) {
+    box.innerHTML = `未检测到虚拟声卡，当前只有你自己能听到。想进直播请先装 <a href="https://vb-audio.com/Cable/" target="_blank">VB-CABLE</a>（见 README 第 2 节）。`;
+  } else {
+    box.classList.add("mute");
+    box.innerHTML = `已检测到虚拟声卡，但当前输出是 <b>${st.out_name || "默认设备"}</b>。切到 CABLE Input 才能进直播。`;
+  }
+}
+
+/* ---------------- 状态轮询 ---------------- */
+function dbToPct(db) { return Math.max(0, Math.min(100, (db + 60) / 60 * 100)); }
+
+function paintMeter(fillId, holdId, data) {
+  const f = $(fillId), h = $(holdId);
+  f.style.height = dbToPct(data.peak_db) + "%";
+  h.style.bottom = dbToPct(data.hold_db) + "%";
+}
+
+async function poll() {
+  try {
+    const st = await api("/api/state");
+    STATUS = st;
+    const running = st.running;
+    $("#stat-dot").className = "dot " + (st.error ? "err" : running ? "on" : "");
+    $("#stat-text").textContent = st.error ? "错误" : running ? "运行中" : "已停止";
+    $("#stat-lat").textContent = running ? st.latency_ms + " ms" : "—";
+    $("#stat-cpu").textContent = running ? st.cpu + "%" : "—";
+    $("#stat-sr").textContent = running ? (st.fs / 1000) + " kHz" : "—";
+    $("#btn-power").textContent = running ? "停止" : "启动";
+    $("#btn-power").className = running ? "primary on" : "primary";
+
+    paintMeter("#m-in", "#m-in-hold", st.input);
+    paintMeter("#m-out", "#m-out-hold", st.output);
+    $("#ro-in").textContent = st.input.peak_db <= -100 ? "静音" : st.input.peak_db.toFixed(1) + " dB";
+    $("#ro-out").textContent = st.output.peak_db <= -100 ? "静音" : st.output.peak_db.toFixed(1) + " dB";
+
+    const recBtn = $("#btn-rec2");
+    recBtn.innerHTML = st.recording
+      ? `<span class="recdot"></span>停止录制 · ${st.record_seconds.toFixed(1)}s`
+      : `<span class="recdot"></span>开始录制`;
+    recBtn.classList.toggle("on", st.recording);
+    if (st.recording && st.record_path) $("#rec-file").textContent = st.record_path;
+    routeHint(st);
+    if (st.preset !== undefined && st.preset !== PRESET) setPreset(st.preset);
+    if (st.error) { $("#route-hint").className = "hint-box"; $("#route-hint").textContent = "音频错误：" + st.error; }
+  } catch (e) { /* 服务未就绪时静默重试 */ }
+}
+
+/* ---------------- 交互 ---------------- */
+$("#btn-power").onclick = async () => {
+  const action = STATUS.running ? "stop" : "start";
+  await api("/api/control", {action});
+  poll();
+};
+$("#btn-bypass").onclick = async () => {
+  const v = !VALUES.bypass;
+  VALUES.bypass = v;
+  await api("/api/set", {key: "bypass", value: v});
+  $("#btn-bypass").classList.toggle("on", v);
+};
+async function toggleRecord() {
+  await api("/api/control", {action: STATUS.recording ? "record_stop" : "record_start"});
+  poll();
+}
+$("#btn-record").onclick = toggleRecord;
+$("#btn-rec2").onclick = toggleRecord;
+$("#btn-reset").onclick = async () => {
+  const r = await api("/api/control", {action: "reset"});
+  if (r.values) applyValues(r.values);
+  setPreset("原声直通");
+};
+$("#btn-apply").onclick = async () => {
+  const body = {
+    input: Number($("#sel-in").value),
+    output: Number($("#sel-out").value),
+    samplerate: Number($("#sel-sr").value),
+    blocksize: Number($("#sel-block").value),
+  };
+  const r = await api("/api/devices", body);
+  if (!r.ok) {
+    $("#route-hint").className = "hint-box";
+    $("#route-hint").textContent = "切换失败：" + (r.error || "设备被占用？");
+  }
+  poll();
+};
+$("#btn-refresh").onclick = async () => {
+  SCHEMA = await (await fetch("/api/schema")).json();
+  fillDevices();
+  poll();
+};
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  if (e.key === "b" || e.key === "B") $("#btn-bypass").click();
+  if (e.key === "r" || e.key === "R") toggleRecord();
+});
+
+/* ---------------- 启动 ---------------- */
+(async function boot() {
+  SCHEMA = await (await fetch("/api/schema")).json();
+  const st = await (await fetch("/api/state")).json();
+  VALUES = st.values || {};
+  buildPresets();
+  buildCards();
+  fillDevices();
+  setPreset(st.preset || SCHEMA.config.last_preset);
+  applyValues(VALUES);
+  poll();
+  setInterval(poll, 130);
+})();
+</script>
+</body>
+</html>
