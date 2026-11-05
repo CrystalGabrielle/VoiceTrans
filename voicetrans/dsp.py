@@ -201,7 +201,15 @@ class Compressor:
             else:
                 self.env *= self.rel
             e = lin2db(self.env)
-            target = 0.0 if e <= thresh else -(e - thresh) * (1.0 - 1.0 / ratio)
+            # 6 dB 软拐点：压缩不是"到点就折"，过渡圆滑，听感更接近人声的呼吸感
+            knee = 6.0
+            if e <= thresh - knee * 0.5:
+                target = 0.0
+            elif e >= thresh + knee * 0.5:
+                target = -(e - thresh) * (1.0 - 1.0 / ratio)
+            else:
+                d = e - (thresh - knee * 0.5)
+                target = -(d * d) / (2.0 * knee) * (1.0 - 1.0 / ratio)
             coef = self.att if target < self.gr else self.relg
             self.gr += (target - self.gr) * coef
             out[i] = self.gr
@@ -211,6 +219,60 @@ class Compressor:
         lin = 10.0 ** (g / 20.0)
         lin, self.zi = lfilter([self.a], [1.0, self.a - 1.0], lin, zi=self.zi)
         return x * lin
+
+
+class DeEsser:
+    """分频式齿音抑制：4 阶 Butterworth 在 5 kHz 分频，只压高频带。
+
+    变调后 s/sh 的整体上移约 1.6 倍，齿音会挤到 7~9 kHz 变成刺耳的"沙"，
+    这是听感"像机器"的主要来源之一。这里只衰减高频带的瞬态，不动 5 kHz 以下，
+    所以不会像全带压缩那样把字音压扁。
+    """
+
+    def __init__(self, fs, block, freq=5000.0):
+        self.fs, self.block = fs, block
+        self.ctl = _Control(fs, block)
+        nyq = fs / 2.0
+        self.sos_lp = butter(6, freq / nyq, btype="lowpass", output="sos")
+        self.sos_hp = butter(6, freq / nyq, btype="highpass", output="sos")
+        self.zi_lp = np.zeros((self.sos_lp.shape[0], 2))
+        self.zi_hp = np.zeros((self.sos_hp.shape[0], 2))
+        self.env = 0.0
+        self.gr = 0.0
+        dt = self.ctl.c / fs
+        self.rel = math.exp(-dt / 0.050)          # 包络释放 50 ms
+        self.att_g = 1 - math.exp(-dt / 0.0015)   # 起控 1.5 ms
+        self.relg = 1 - math.exp(-dt / 0.060)     # 恢复 60 ms
+        self.a = 1 - math.exp(-1.0 / (fs * 0.0015))
+        self.zi = np.zeros(1)
+
+    def reset(self):
+        self.zi_lp[:] = 0
+        self.zi_hp[:] = 0
+        self.env = 0.0
+        self.gr = 0.0
+        self.zi[:] = 0
+
+    def process(self, x, amount):
+        if amount <= 0.5:
+            self.gr *= 0.9
+            return x
+        lo, self.zi_lp = sosfilt(self.sos_lp, x, zi=self.zi_lp)
+        hi, self.zi_hp = sosfilt(self.sos_hp, x, zi=self.zi_hp)
+        pk = self.ctl.peaks(hi)
+        thr = 0.050 - amount * 0.00030            # 0.05 .. 0.02，越大越灵敏
+        maxgr = 3.0 + amount * 0.13               # 最多压 3 .. 16 dB
+        out = np.empty_like(pk)
+        for i, p in enumerate(pk):
+            self.env = p if p > self.env else self.env * self.rel
+            over = 20.0 * math.log10(max(self.env, 1e-9) / max(thr, 1e-6))
+            target = 0.0 if over <= 0.0 else -min(maxgr, over * 0.95)
+            coef = self.att_g if target < self.gr else self.relg
+            self.gr += (target - self.gr) * coef
+            out[i] = self.gr
+        g = 10.0 ** (self.ctl.upsample(out) / 20.0)
+        g, self.zi = lfilter([self.a], [1.0, self.a - 1.0], g, zi=self.zi)
+        return (lo + hi * g).astype(np.float32)
 
 
 class Limiter:
@@ -431,12 +493,14 @@ class VoiceChain:
         n_fft = 1024 if block <= 256 else 2 * block
         self.shifter = VoiceShifter(fs, n_fft=n_fft, hop=block)
         self.eq = EqChain(fs)
+        self.deess = DeEsser(fs, block)
         self.gate = Gate(fs, block)
         self.comp = Compressor(fs, block)
         self.rev = Reverb(fs, block)
         self.lim = Limiter(fs, block)
         self.rng = np.random.default_rng(12345)
         self.robot_phase = 0.0
+        self._nz_prev = 0.0
         self._sm = {}
         self._fade = 0.0
         self._agc_db = 0.0
@@ -447,8 +511,10 @@ class VoiceChain:
     def reset(self):
         """开流时调用：清空 STFT 状态并重新淡入，避免首帧爆音。"""
         self.shifter.reset()
+        self.deess.reset()
         self._fade = 0.0
         self._agc_db = 0.0
+        self._nz_prev = 0.0
 
     def _smooth(self, key, target, alpha=0.25):
         cur = self._sm.get(key)
@@ -483,6 +549,8 @@ class VoiceChain:
         pr = semitones_to_ratio(float(p.get("pitch", 0.0)))
         fr = semitones_to_ratio(float(p.get("formant", 0.0)))
         x = self.shifter.process(x, pr, fr)
+        # 齿音抑制紧跟变声：只处理"变调后变刺"的那一段，且不被后面的气声噪声误触发
+        x = self.deess.process(x, self._smooth("deess", float(p.get("deess", 0))))
 
         drive = self._smooth("drive", float(p.get("drive", 0.0)))
         if drive > 0.5:
@@ -502,7 +570,12 @@ class VoiceChain:
             # 简单包络平滑（块内）
             a = 1 - math.exp(-self.block / (self.fs * 0.02))
             env = lfilter([a], [1.0, a - 1.0], env)
-            nz = self.rng.standard_normal(len(x)).astype(np.float32) * env * 3.0
+            # 一阶高通的白噪：真实气声集中在 1.5 kHz 以上，全频白噪只会把声音弄"糊"，
+            # 听着像底噪而不像呼吸。
+            raw = self.rng.standard_normal(len(x) + 1).astype(np.float32)
+            raw[0] = self._nz_prev
+            self._nz_prev = float(raw[-1])
+            nz = np.diff(raw) * 2.2 * env
             m = whisper / 100.0
             x = x * (1 - m * 0.55) + nz * m
 

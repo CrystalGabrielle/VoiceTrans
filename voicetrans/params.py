@@ -32,6 +32,8 @@ PARAMS = [
     _p("eq_low", "低频", -12, 12, 0.5, 0.0, "dB", "音色", hint="200Hz 附近，厚度"),
     _p("eq_mid", "中频", -12, 12, 0.5, 0.0, "dB", "音色", hint="2kHz 附近，清晰度/穿透"),
     _p("eq_high", "高频", -12, 12, 0.5, 0.0, "dB", "音色", hint="6kHz 以上，空气感"),
+    _p("deess", "齿音抑制", 0, 100, 1, 0, "%", "音色",
+       hint="变调后 s/sh 会被推到 7~9 kHz 变刺，这里只压这一段，字音不变闷"),
 
     # ---------------- 效果 ----------------
     _p("drive", "失真染色", 0, 100, 1, 0, "%", "效果", hint="加厚、加脏，怪兽/机械音必备"),
@@ -62,9 +64,9 @@ def _preset(name, desc, **kw):
 
 PRESETS = [
     _preset("原声直通", "不做任何处理，用于对比", bypass=False),
-    _preset("甜美女声", "男声 → 女声，甜而不尖", pitch=8.5, formant=3.2, eq_low=-4.0,
-            eq_mid=3.0, eq_high=5.0, comp=25, reverb_mix=8, hpf=140,
-            output_gain=1.5),
+    _preset("甜美女声", "男声 → 女声，甜而不尖", pitch=8.5, formant=3.2, eq_low=-3.0,
+            eq_mid=2.5, eq_high=2.5, comp=16, reverb_mix=5, hpf=125,
+            deess=40, whisper=3, output_gain=1.5),
     _preset("萝莉音", "高甜、偏薄，适合聊天/游戏", pitch=10.0, formant=6.5, eq_high=3.0,
             whisper=6, comp=30, reverb_mix=10),
     _preset("御姐音", "低沉女声，气场强", pitch=3.0, formant=2.0, eq_low=1.5, comp=40,
@@ -156,6 +158,8 @@ def load_config():
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
             for k in ("input_device", "output_device", "samplerate", "blocksize",
+                      "input_device_name", "input_device_api",
+                      "output_device_name", "output_device_api",
                       "last_preset", "ui_port"):
                 if k in data and data[k] is not None:
                     cfg[k] = data[k]
