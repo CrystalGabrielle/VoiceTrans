@@ -9,7 +9,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 from . import params as P
-from .engine import AudioEngine, has_virtual_cable, list_devices, pick_defaults
+from .engine import (AudioEngine, dev_info, has_virtual_cable, list_devices,
+                     pick_defaults, resolve_device)
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 
@@ -17,10 +18,13 @@ WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 class App:
     def __init__(self, cfg=None):
         self.cfg = cfg or P.load_config()
+        self._drift = None
         if not self.cfg.get("input_device") and not self.cfg.get("output_device"):
             d_in, d_out = pick_defaults()
             self.cfg["input_device"] = d_in
             self.cfg["output_device"] = d_out
+        else:
+            self._rematch_devices()
         self.store = P.ParamStore(self.cfg.get("params"))
         self.engine = AudioEngine(self.store, int(self.cfg["samplerate"]), int(self.cfg["blocksize"]))
         self.last_preset = self.cfg.get("last_preset") or "原声直通"
@@ -30,6 +34,21 @@ class App:
         self._saver.start()
 
     # ---------------- 配置持久化 ----------------
+    def _rematch_devices(self):
+        """启动时按名字把设备序号重新对一遍，避免装虚拟声卡/插拔麦克风后串到别处。"""
+        cfg = self.cfg
+        in_dev = resolve_device(cfg.get("input_device"), cfg.get("input_device_name"), True,
+                                cfg.get("input_device_api", ""))
+        out_dev = resolve_device(cfg.get("output_device"), cfg.get("output_device_name"), False,
+                                 cfg.get("output_device_api", ""))
+        if in_dev is None or out_dev is None:
+            d_in, d_out = pick_defaults()
+            in_dev = d_in if in_dev is None else in_dev
+            out_dev = d_out if out_dev is None else out_dev
+        if (in_dev, out_dev) != (cfg.get("input_device"), cfg.get("output_device")):
+            self._drift = (cfg.get("input_device"), cfg.get("output_device"), in_dev, out_dev)
+        cfg["input_device"], cfg["output_device"] = in_dev, out_dev
+
     def touch(self):
         self._dirty = True
 
@@ -45,6 +64,11 @@ class App:
             self.cfg["params"] = self.store.snapshot()
             self.cfg["input_device"] = self.engine.in_dev or self.cfg.get("input_device")
             self.cfg["output_device"] = self.engine.out_dev or self.cfg.get("output_device")
+            for side, idx in (("input", self.engine.in_dev), ("output", self.engine.out_dev)):
+                info = dev_info(idx) if idx is not None else None
+                if info:
+                    self.cfg[f"{side}_device_name"] = info["name"]
+                    self.cfg[f"{side}_device_api"] = info["hostapi"]
             self.cfg["samplerate"] = self.engine.fs
             self.cfg["blocksize"] = self.engine.block
             self.cfg["last_preset"] = self.last_preset
@@ -59,6 +83,9 @@ class App:
         st["values"] = self.store.snapshot()
         st["preset"] = self.last_preset
         st["port"] = int(self.cfg.get("ui_port", 8765))
+        if self._drift:
+            st["device_drift"] = {"from": [self._drift[0], self._drift[1]],
+                                  "to": [self._drift[2], self._drift[3]]}
         return st
 
     def set_param(self, key, value):

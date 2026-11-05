@@ -105,6 +105,37 @@ def has_virtual_cable():
     return any(d["virtual"] and d["out"] > 0 for d in list_devices())
 
 
+def dev_info(idx):
+    """按序号取设备信息，越界或非法返回 None。"""
+    try:
+        return list_devices()[int(idx)]
+    except Exception:
+        return None
+
+
+def resolve_device(saved_idx, saved_name, want_in, saved_api=""):
+    """按名字把设备找回来。
+
+    设备序号是会整体漂移的：装/卸虚拟声卡、插拔 USB 声卡都会让 index 变化，
+    但设备名稳定。所以优先按名字匹配，同名多个宿主 API 时优先原来那个、其次 WASAPI。
+    """
+    devs = list_devices()
+    pool = [d for d in devs if (d["in"] if want_in else d["out"]) > 0]
+    if saved_name:
+        same = [d for d in pool if d["name"] == saved_name]
+        if same:
+            pref = ([d for d in same if d["hostapi"] == saved_api]
+                    or [d for d in same if "WASAPI" in d["hostapi"]]
+                    or same)
+            return pref[0]["index"]
+    if saved_idx is not None:
+        cur = dev_info(saved_idx)
+        if cur and (cur["in"] if want_in else cur["out"]) > 0:
+            if not saved_name or cur["name"] == saved_name:
+                return int(saved_idx)
+    return None
+
+
 class RingBuffer:
     def __init__(self, capacity):
         self.cap = int(capacity)
