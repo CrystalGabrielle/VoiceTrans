@@ -62,8 +62,9 @@ def _preset(name, desc, **kw):
 
 PRESETS = [
     _preset("原声直通", "不做任何处理，用于对比", bypass=False),
-    _preset("甜美女声", "男声 → 女声，自然不尖", pitch=6.0, formant=3.5, eq_high=2.5,
-            comp=35, reverb_mix=12, hpf=90, output_gain=2.0),
+    _preset("甜美女声", "男声 → 女声，甜而不尖", pitch=8.5, formant=3.2, eq_low=-4.0,
+            eq_mid=3.0, eq_high=5.0, comp=25, reverb_mix=8, hpf=140,
+            output_gain=1.5),
     _preset("萝莉音", "高甜、偏薄，适合聊天/游戏", pitch=10.0, formant=6.5, eq_high=3.0,
             whisper=6, comp=30, reverb_mix=10),
     _preset("御姐音", "低沉女声，气场强", pitch=3.0, formant=2.0, eq_low=1.5, comp=40,
