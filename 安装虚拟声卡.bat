@@ -1,24 +1,23 @@
 @echo off
 cd /d "%~dp0"
 echo ============================================
-echo    VB-CABLE 虚拟声卡安装
+echo    VB-CABLE 需要自行从官网下载
 echo ============================================
 echo.
-echo 这个驱动做的事：把"变声后的声音"变成一根虚拟音频线，
-echo 直播软件从线的另一头（CABLE Output）取声音当麦克风用。
+echo 本仓库不附带 VB-CABLE。
+echo 它是 VB-Audio 的捐赠软件，版权归 Vincent Burel，
+echo 不在本项目的 MIT 许可之内。
 echo.
-echo 接下来会弹出 UAC 授权窗口，请点"是"；
-echo 在安装程序里点 "Install Driver"；装完点确定，然后重启电脑。
+echo 请打开官网下载官方压缩包并解压：
+echo     https://vb-audio.com/Cable/
+echo 64 位系统：右键 VBCABLE_Setup_x64.exe
+echo           选择“以管理员身份运行”
+echo 32 位系统：右键 VBCABLE_Setup.exe，同样以管理员运行
+echo 在安装窗口点 Install Driver，完成后重启电脑。
 echo.
-if not exist "tools\VBCABLE\VBCABLE_Setup_x64.exe" (
-    echo [x] 没找到安装文件，请手动下载：
-    echo     https://vb-audio.com/Cable/
-    pause
-    exit /b 1
-)
-pause
-powershell -NoProfile -Command "Start-Process -FilePath '%CD%\tools\VBCABLE\VBCABLE_Setup_x64.exe' -Verb RunAs"
+echo 来源 www.vb-cable.com 。VB-CABLE 是捐赠软件。
 echo.
-echo 安装程序已启动。装完后重启电脑，再打开"启动变声器.bat"，
-echo 在"设备 → 输出去向"里选择 CABLE Input 即可。
+echo 正在打开官网...
+start "" "https://vb-audio.com/Cable/"
+echo.
 pause

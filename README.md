@@ -3,7 +3,7 @@
 一套完全跑在本机的实时变声器：麦克风进 → 变声处理 → 虚拟声卡出 → 直播软件当麦克风用。
 **不联网、不上传、不依赖任何在线服务**，48 kHz 下单块 256 采样，端到端延迟约 **65 ms**，CPU 占用 **单核 3% ~ 20%**（看预设）。
 
-本仓库中由本项目提供的源代码、脚本、文档与网页界面**全部由人工智能生成**，采用 [MIT License](LICENSE)。`tools/VBCABLE/` 中的 VB-CABLE 驱动是第三方软件，版权归 VB-Audio Software，按其自有许可使用。
+本仓库中的源代码、脚本、文档与网页界面**全部由人工智能生成**，采用 [MIT License](LICENSE)。虚拟声卡 VB-CABLE 不在本仓库内，需从 [VB-Audio 官网](https://vb-audio.com/Cable/)自行下载，版权归 Vincent Burel。
 
 - 变调 ±12 半音（精度实测偏差 < 0.3%），**共振峰（音色）独立可调** —— 所以能做到「男变女」而不是单纯的「加速」音
 - 14 组直播预设：甜美女声 / 萝莉 / 御姐 / 磁性大叔 / 机械音 / 深渊怪兽 / 电话音 / 耳语…
@@ -41,12 +41,17 @@
 直播软件 ◄── 麦克风选 CABLE Output（虚拟线的出口）
 ```
 
-### 2.1 安装虚拟声卡（VB-CABLE，免费）
+### 2.1 安装虚拟声卡（VB-CABLE，捐赠软件）
 
-1. 双击项目根目录的 **`安装虚拟声卡.bat`**（驱动包已放在 `tools/VBCABLE/`，无需联网）
-2. 弹出 UAC 点「是」→ 在安装窗口点 **Install Driver** → 确定
-3. **重启电脑**（驱动必须重启才生效）
-4. 重启后右下角音量图标里会多出 `CABLE Input` / `CABLE Output` 两个设备
+本仓库不附带该驱动。VB-CABLE 版权归 Vincent Burel，按其自带许可：可以原样传播，不得修改；未经作者同意，不得嵌进其他软件的安装包。请自行从官网下载官方压缩包。
+
+1. 双击 **`安装虚拟声卡.bat`**，会打开官网 [https://vb-audio.com/Cable/](https://vb-audio.com/Cable/)
+2. 下载官方压缩包并解压。64 位系统右键 **`VBCABLE_Setup_x64.exe`** → 以管理员身份运行；32 位系统运行 `VBCABLE_Setup.exe`
+3. 在安装窗口点 **Install Driver** → 确定
+4. **重启电脑**（驱动必须重启才生效）
+5. 重启后右下角音量图标里会多出 `CABLE Input` / `CABLE Output` 两个设备
+
+来源：[www.vb-cable.com](https://www.vb-cable.com)。VB-CABLE 是捐赠软件（donationware）。
 
 ### 2.2 在变声器里设置
 
@@ -158,7 +163,7 @@
 噪声门阈值往上调到 −45 左右（说话时仍能正常打开），并检查麦克风增益是不是拉太满。
 
 **CABLE 设备不见了**
-驱动在系统更新后可能掉，重跑 `安装虚拟声卡.bat` 并重启。
+驱动在系统更新后可能掉。从 [VB-Audio 官网](https://vb-audio.com/Cable/)重新下载官方包安装，然后重启。
 
 **换设备后没反应**
 点「刷新设备列表」→ 选设备 → 「应用并重启音频」。
@@ -175,12 +180,11 @@ voice-trans/
 ├─ LICENSE               MIT 许可证（含「全部由 AI 生成」声明）
 ├─ 安装环境.bat          一次性建虚拟环境、装依赖
 ├─ 启动变声器.bat        启动音频引擎 + 控制台（关窗口即结束）
-├─ 安装虚拟声卡.bat      安装 VB-CABLE（需管理员 + 重启）
+├─ 安装虚拟声卡.bat      打开 VB-CABLE 官网（驱动不在本仓库内）
 ├─ 自检.bat              变调精度 / 预设性能 / 设备可打开性
 ├─ 设备列表.bat          打印所有音频设备序号
 ├─ config.json           上次使用的设备、参数、预设（自动保存）
-├─ recordings/           录制的 WAV
-├─ tools/VBCABLE/        VB-CABLE 驱动包（已解压）
+├─ recordings/           录制的 WAV（不进仓库）
 └─ voicetrans/
    ├─ dsp.py             变调/共振峰、EQ、门限、压缩、混响、特效、限幅
    ├─ engine.py          WASAPI 双流、环形缓冲、电平表、录制
@@ -221,6 +225,6 @@ voice-trans/
 
 本项目采用 [MIT License](LICENSE)。
 
-**本项目提供的源代码、脚本、文档与控制台界面全部由人工智能生成。** 版权行记为 `Copyright (c) 2026 voice-trans`。
+**本仓库的源代码、脚本、文档与控制台界面全部由人工智能生成。** 版权行记为 `Copyright (c) 2026 voice-trans`。
 
-`tools/VBCABLE/` 里的 VB-CABLE 虚拟声卡驱动不在本许可证范围内，版权归 VB-Audio Software，安装与使用遵循其自有许可。
+本仓库不包含 VB-CABLE。该驱动版权归 Vincent Burel，不在 MIT 许可内。安装与再分发遵循其官方压缩包里的许可：允许原样传播，不得修改，未经作者同意不得嵌进其他软件的安装流程。
